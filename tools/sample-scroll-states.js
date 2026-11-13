@@ -7,17 +7,24 @@ function boundedInteger(value, fallback, max) {
 const DEFAULT_DEPTHS = [0, 500, 1500, 3300, 7000]
 
 export async function sampleScrollStates(ctx, args = {}) {
+  const page = ctx?.page
+  if (!page || typeof page.evaluate !== 'function') {
+    throw new Error('sampleScrollStates: ctx.page must be an ego-browser Page, e.g. { page: (await task.pages())[0] }')
+  }
   const { selector } = args
   if (!selector) throw new Error('sampleScrollStates: selector is required')
   const settleMs = boundedInteger(args.settleMs, 600, 2000)
-  const depths = Array.isArray(args.depths) && args.depths.length ? args.depths.map(Number) : DEFAULT_DEPTHS
+  const depths = Array.isArray(args.depths) && args.depths.length
+    ? args.depths.map(Number).filter((y) => Number.isFinite(y) && y >= 0)
+    : DEFAULT_DEPTHS
+  if (!depths.length) throw new Error('sampleScrollStates: depths has no valid scroll positions: ' + JSON.stringify(args.depths))
 
   const snapshotAt = async (y) => {
-    await ctx.page.evaluate((v) => scrollTo(0, v), y)
-    // Background task spaces do not dispatch scroll events; drive the state machine manually.
-    await ctx.page.evaluate(() => window.dispatchEvent(new Event('scroll')))
-    await ctx.page.waitForTimeout(settleMs)
-    return ctx.page.evaluate((sel) => {
+    await page.evaluate((v) => scrollTo(0, v), y)
+    // A programmatic scrollTo dispatches no scroll event in an agent task space; drive the state machine manually.
+    await page.evaluate(() => window.dispatchEvent(new Event('scroll')))
+    await page.waitForTimeout(settleMs)
+    return page.evaluate((sel) => {
       const el = document.querySelector(sel)
       if (!el) return null
       const walk = (n, depth) => {

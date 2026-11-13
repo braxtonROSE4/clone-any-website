@@ -111,6 +111,7 @@ echo "Any other agent: point it at $DEST/SKILL.md"
 if ! command -v ego-browser >/dev/null 2>&1; then
   echo
   echo "Note: the 'ego-browser' CLI is not on PATH. Every live-page probe runs through it."
-  echo "Install ego lite from https://lite.ego.app/ (or run $DEST/scripts/install-ego-browser.sh),"
-  echo "finish first-run onboarding in the app, then re-check with: command -v ego-browser"
+  echo "Install ego lite from https://lite.ego.app/ (macOS and Windows; on macOS you can also run"
+  echo "sh $DEST/scripts/install-ego-browser.sh), finish first-run onboarding in the app,"
+  echo "then re-check with: command -v ego-browser"
 fi

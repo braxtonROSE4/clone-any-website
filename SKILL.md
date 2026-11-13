@@ -2,9 +2,10 @@
 name: clone-website
 description: Reverse-engineer and pixel-perfect clone any live website, a single landing page or an entire site. Captures DOM, CSS design tokens, assets, fonts, and compiled-JS config data from the live page, reverse-engineers scroll animations and stateful interactions, rebuilds (raw-HTML mirror for static-export sites like Webflow/Framer, Next.js components for JS-framework sites), then proves fidelity with a scored benchmark (same-probe geometry diff, asset/font/animation coverage, screenshot slicing). Use this skill whenever the user wants to clone, replicate, rebuild, or reverse-engineer a website's design or behavior. Triggers include "clone this website", "reverse this landing page", "rebuild this page pixel-perfect", "copy this site's design", "how does this site do that scroll effect", "复刻网站", "复刻落地页", "1:1 复刻", "逆向这个网站". Prefer this skill over ad-hoc screenshot-and-eyeball cloning. Not for general browser automation, scraping, or screenshots (use ego-browser directly), capturing article content into notes, SEO/content audits, or building a new design merely inspired by a site; load it only when the goal is faithful reproduction or understanding a site's implementation. Runs on the ego lite browser via the ego-browser skill; when the ego-browser CLI is not installed, guide the user through installing ego lite first (references/install.md) instead of substituting another automation tool.
 metadata:
-  version: "2.1.0"
-  date: "2026-08-02"
-  battle-tested-on: "arc.net, town.com (2026-08-01), wisprflow.ai (2026-08-02)"
+  version: "2.2.0"
+  date: "2026-11-13"
+  battle-tested-on: "arc.net, town.com (2026-08-01), wisprflow.ai (2026-08-02, re-verified 2026-11-13)"
+  tested-with: "ego lite 0.6.3.12, ego-browser usage guide v2.2.1"
 ---
 
 # clone-website
@@ -13,26 +14,29 @@ Clone any live website 1:1 (layout, typography, assets, scroll animations, state
 
 ## Runtime dependency and bootstrap
 
-Every live-page operation runs as `ego-browser nodejs <<'EOF' ... EOF` in Bash, using the ego lite runtime's preloaded `page`, `browser`, and `taskSpaces` facades.
+Every live-page operation runs as `ego-browser nodejs <<'EOF' ... EOF` in Bash. The script runs in ego lite's Node.js runtime, which exposes `taskSpace()` and the TaskSpace/Page API; there are no preloaded `page`, `browser`, or `taskSpaces` globals, and older scripts that assume them fail with `taskSpaces is not defined`.
 
 The runtime is not interchangeable, because the method depends on it three ways. The pixel-level loop needs the identical probe running in the identical runtime on original and clone, or the diff numbers mean nothing. The correction loop needs task spaces: the agent probes in its own isolated spaces while the user simultaneously browses the original and the clone in theirs, takes over any space for a visual check, and hands it back, without either side competing for the browser. And every probe script and caveat in this skill is calibrated against this runtime's measured behavior. This is why a missing runtime routes to installing ego lite rather than to a substitute.
 
-1. **If the `ego-browser` skill is installed in this environment, load it before Phase 0 and obey all of its correctness rules.** This skill is a wrapper around it; on any conflict, the ego-browser skill's rules win for browser mechanics, this skill's rules win for the cloning workflow.
-2. **If only this skill is present, it works standalone.** The contract is the `ego-browser` CLI (provided by the ego lite app). In a fresh or unknown environment, check once with `command -v ego-browser` before Phase 0.
-3. **When the CLI is missing, do not improvise.** Stop, read `references/install.md`, and walk the user through installing ego lite (download via `scripts/install-ego-browser.sh`, then the user finishes onboarding in the app GUI, which registers the CLI; wait for their confirmation, verify with `command -v ego-browser`, then resume). Never fall back to Playwright, another browser, WebFetch, or any other automation path; probe results from a different runtime are not comparable and the skill's environment caveats no longer hold.
-4. After the first successful command, assume the runtime is ready for the rest of the session; investigate only when a real command errors.
+1. **Before Phase 0, run `ego-browser skill` once and follow its output.** It prints the usage guide for the installed ego lite version. Its browser-mechanics rules (task spaces, Page labels, finishing a reply, user control) win over anything here; this skill's rules win for the cloning workflow. If the output lacks the final `[ego-browser:skill] end of guide` line it was truncated: save it to a file and read it in parts.
+2. **`ego-browser: command not found`: do not improvise.** Stop, read `references/install.md`, and walk the user through installing ego lite (macOS: `scripts/install-ego-browser.sh`; Windows: the installer from https://lite.ego.app/), then the user finishes onboarding in the app, which registers the CLI. Wait for their confirmation, verify with `command -v ego-browser`, then resume. Never fall back to Playwright, another browser, WebFetch, or any other automation path; probe results from a different runtime are not comparable and the skill's environment caveats no longer hold.
+3. **`Unknown command: skill`: ego lite is older than these scripts.** Ask the user, run `ego-browser upgrade`, then `ego-browser skill` again.
+4. On Windows, run everything from Git Bash: the heredocs, `bash scripts/run_eval.sh`, and `python3` assume a POSIX shell.
+5. After the first successful command, assume the runtime is ready for the rest of the session; investigate only when a real command errors.
 
 The method in one sentence: treat the live site as ground truth you can query, not a picture you eyeball. Pull the real DOM, real CSS tokens, real keyframes, real fonts, and real config data out of the running page, rebuild from those facts, then run the same measurement probe on original and clone and diff the numbers until they converge.
 
-File map: copy-paste probe scripts in `references/probes.md`; benchmark protocol in `references/eval.md`; ego lite install guide in `references/install.md` (installer vendored at `scripts/install-ego-browser.sh`); tool/function design template in `references/tool-design-template.md`; canonical tool implementations in `tools/` (registered in `tools/manifest.json`); scorer in `scripts/eval_score.py`; screenshot slicer in `scripts/slice.py`.
+File map: copy-paste probe scripts in `references/probes.md`; benchmark protocol in `references/eval.md`; ego lite install guide in `references/install.md` (macOS installer vendored at `scripts/install-ego-browser.sh`); tool/function design template in `references/tool-design-template.md`; canonical tool implementations in `tools/` (registered in `tools/manifest.json`, including `full-page-screenshot.js` for pages past Chromium's 16384px capture limit); scorer in `scripts/eval_score.py`; screenshot slicer in `scripts/slice.py`.
 
 ## Execution model
 
-- **One task space for the whole job.** `taskSpaces.useOrCreate('reverse <site>')` at the top of every heredoc; the same name across all invocations. Do not `complete` it between probes; complete with `{ keep: false }` only after final acceptance. If the user takes the space over, that is a hard stop: report state and wait, never `takeOver` on your own.
+- **One task space and one Page for the whole job.** A new job opens its space with `taskSpace('reverse <site>')`; a job continued from an earlier reply finds its space in `listTaskSpaces()` and resumes it by ownership, as the `ego-browser skill` guide's start-of-reply rule says (`taskSpace(id)`, `claimTaskSpace(id)`, or `takeOverTaskSpace(id)`). Print `task.spaceId` and use `taskSpace(<id>)` in every later script. Work in the space's first Page, `(await task.pages())[0]`, for both original and clone: one Page means one viewport. Never open another space to recover from a stuck Page; reload it, or use `task.newPage()` in the same space.
+- **End each reply's browser work with one `finish()`**, in its own last script, after earlier output shows the work is done: `await task.finish({ keep: [] })`. Keep a Page only when the user should look at it, such as the clone handed over for the real-browser pass: `finish({ keep: [page.label] })`. If the user takes control of the space, stop, report state, and wait; resume with `takeOverTaskSpace(<id>)` only after they confirm, and do not call `finish()`.
 - **Batch by phase, not by action.** One heredoc should finish an entire probe (open, freeze videos, measure at every depth, print). Split invocations only at real boundaries: shell work between browser work (curl downloads, greps, Python), user confirmation, or visual inspection of a saved image.
 - **Artifacts to files, summaries to stdout.** Every probe writes its full JSON/HTML into `reference/`, and `console.log`s only counts and paths. Never dump a full DOM, CSS file, or geometry table into the conversation.
-- **Every probe script is self-contained.** Task-space selection and `browser.openOrReuseTab(url, { wait: true, timeout: 30000 })` at the top, every time; runtime state does not survive across heredocs.
-- **Absolute paths only inside heredocs.** ego's nodejs process does not inherit the shell's cwd; relative `fs.writeFileSync` paths ENOENT. Define a `ROOT` constant at the top of every script.
+- **Every probe script is self-contained.** Space selection and `page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })` at the top, every time; task spaces and Page labels persist across heredocs, JavaScript variables do not.
+- **Absolute paths only inside heredocs, no shell variables.** ego's Node.js process inherits neither the shell's cwd nor its environment: relative `fs.writeFileSync` paths ENOENT and `process.env` lacks your exports. Define a `ROOT` constant at the top of every script, or use an unquoted heredoc (`<<EOF`) so the shell writes values into the script text.
+- **The API is ego-browser's own, not Playwright.** Use the TaskSpace and Page methods the guide lists (`help("page.screenshot")` prints exact options); for anything else use `page.evaluate()` or `page.cdp()`. Real wheel input needs the pointer over the scroll area first in every script: `page.mouse.move(x, y)`, then `page.mouse.wheel(0, dy)`.
 
 ## Quick start: recon bootstrap
 
@@ -41,9 +45,12 @@ One invocation captures the ground truth a rebuild starts from. Adapt URL and pa
 ```bash
 mkdir -p reference/{dom,css,js,screenshots} && ego-browser nodejs <<'EOF'
 const fs = await import('node:fs')
-const ROOT = '/abs/path/to/project'  // ego's nodejs does not inherit the shell cwd
-await taskSpaces.useOrCreate('reverse example.com')
-await browser.openOrReuseTab('https://example.com', { wait: true, timeout: 30000 })
+const ROOT = '/abs/path/to/project'  // ego's Node.js process does not inherit the shell cwd
+const { fullPageScreenshot } = await import('/abs/path/to/clone-website/tools/full-page-screenshot.js')
+const task = await taskSpace('reverse example.com')  // later scripts: taskSpace(<the printed spaceId>)
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('https://example.com', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})  // load can fire late or never
 
 // Freeze autoplay videos FIRST: they saturate the render thread and later evaluates time out.
 await page.evaluate(() => {
@@ -72,9 +79,10 @@ fs.writeFileSync(ROOT + '/reference/urls.json', JSON.stringify({ css: facts.cssU
 
 await page.evaluate(() => scrollTo(0, 0))
 await page.waitForTimeout(800)
-await page.screenshot({ path: ROOT + '/reference/screenshots/original-full.png', fullPage: true })
+// One capture up to 16384px tall; longer pages are captured in bands and stitched.
+await fullPageScreenshot({ page }, { path: ROOT + '/reference/screenshots/original-full.png' })
 
-console.log(JSON.stringify({ sections: facts.outline.length, cssFiles: facts.cssUrls.length,
+console.log(JSON.stringify({ taskSpaceId: task.spaceId, sections: facts.outline.length, cssFiles: facts.cssUrls.length,
   fontFiles: facts.fontFiles.length, jsChunks: facts.jsChunks.length, htmlKB: Math.round(facts.html.length / 1024) }))
 EOF
 ```
@@ -136,10 +144,10 @@ For JS-framework sites (Next.js, Remix — hydration mismatch makes a mirror inf
 Iterate with the probes until convergence, then run the scored benchmark (`references/eval.md`):
 
 ```bash
-bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out
+bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out <taskSpaceId>
 ```
 
-The benchmark emits `scorecard.json` and `report.md` with per-dimension scores (geometry, typography, color, assets, fonts, animations, mock content, visual similarity) against fixed thresholds. **Do not declare the clone done below a 90 total or with any failing dimension**; fix and re-run. The scorecard is the deliverable that replaces "looks close".
+Pass the job's task space id so both sides are probed through its Page; without it the script opens and finishes a space of its own. The benchmark emits `scorecard.json` and `report.md` with per-dimension scores (geometry, typography, color, assets, fonts, animations, mock content, visual similarity) against fixed thresholds. **Do not declare the clone done below a 90 total or with any failing dimension**; fix and re-run. The scorecard is the deliverable that replaces "looks close".
 
 Acceptance additions the scorer cannot see, verify by probe:
 - Every product-UI mock container individually inspected for internal content. A blank panel is a defect until the live original proves it is blank; reference screenshots miss lazy-loaded content, and matching a defective reference means you cloned the bug.
@@ -166,7 +174,7 @@ Then hand to the user for a real-browser pass. The user watching the real page i
 
 - Never screenshot after a programmatic scroll. With scroll-driven animations, compositor layers drop from CDP captures (solid-color frames); even without them, post-scroll viewport captures show body-background voids while `scrollY` reads correctly. All layout evidence comes from one fullPage screenshot at scroll position 0, sliced by DOM rect coordinates.
 - Pause all videos before any evaluate-heavy work and re-freeze on an interval; React pages restart playback. Need a real frame, set `v.currentTime = 3`.
-- Neutralize stateful UI before measuring: clear `localStorage`/`sessionStorage`, reopen, return to top, confirm the bar state. A dismissible banner in a different state shifts every y coordinate on the page (495px on arc.net) and invalidates a whole measurement run.
+- Neutralize stateful UI before measuring: clear `localStorage`/`sessionStorage`, reload, return to top, confirm the bar state. A dismissible banner in a different state shifts every y coordinate on the page (495px on arc.net) and invalidates a whole measurement run. When the state lives in a cookie, clear only that origin, `page.cdp('Storage.clearDataForOrigin', { origin, storageTypes: 'cookies' })`, and tell the user first: it signs them out of that site. Never run `Network.clearBrowserCookies`, `Network.clearBrowserCache`, or `Storage.clearCookies`: the task space shares the user's browser profile and those wipe every site's login, with no way back.
 - Scroll interactions are asserted by dispatching `window.scrollTo(...)` then `window.dispatchEvent(new Event('scroll'))`, checking class/content flips in both directions. Never assert computed animation values mid-transition; transitions are frozen in the probe environment.
 - Animations are asserted with `getAnimations()` counts, timeline types, and keyframes, never with screenshots.
 - Duplicate headings in the DOM are usually responsive variants (`md:hidden` / `hidden md:block`), not animation clones; the semantic heading may be `sr-only`.
@@ -179,11 +187,13 @@ Then hand to the user for a real-browser pass. The user watching the real page i
 
 | Symptom in the probe environment | Cause | What to do |
 |---|---|---|
-| Scroll-triggered JS never fires, interaction "does not exist" | Background task spaces do not dispatch scroll events | Drive the state machine with manual `dispatchEvent(new Event('scroll'))`; confirm existence via user screenshot or compiled JS |
-| Clone state machine never updates during verification | `requestAnimationFrame` does not run in background spaces | Write the clone with plain scroll listeners; assert state flips, not animation values |
-| Element styles look mid-transition or stale | CSS transitions are frozen | Assert classes and content, wait 600ms after dispatch before reading |
-| `IntersectionObserver` reveal never fires after scrolling | Observer callbacks may not run | Do not diagnose the original as buggy; force reveal-pending elements visible via evaluate before screenshots |
+| Scroll-triggered JS never fires, interaction "does not exist" | A programmatic `scrollTo()` in an agent task space dispatches no `scroll` event (measured 0); real wheel input does | Drive the state machine with manual `dispatchEvent(new Event('scroll'))`, or `page.mouse.move` then `page.mouse.wheel`; confirm existence via user screenshot or compiled JS |
+| Clone state machine never updates during verification | `requestAnimationFrame` barely runs in an agent space without input (measured 3 callbacks in 1s idle) | Write the clone with plain scroll listeners; assert state flips, not animation values |
+| Element styles look mid-transition or stale | CSS transitions are frozen (a 2s transition had not moved after 1s) | Assert classes and content, wait 600ms after dispatch before reading |
+| `IntersectionObserver` reveal never fires after scrolling | IO fires on a fresh Page once the element is in view and the page idles ~1.5s, but a Page reloaded or probed many times can stop delivering callbacks | A/B on a fresh Page on both sides (`task.newPage()`, close it after) before calling it a defect; force reveal-pending elements visible via evaluate before screenshots |
 | Screenshot is a solid color after scrolling | Compositor animation layers drop from CDP capture | fullPage at scroll 0, slice with `scripts/slice.py` |
+| Full-page capture fails with "Unable to capture screenshot" | Chromium caps one capture at 16384 CSS px tall | `tools/full-page-screenshot.js` captures bands and stitches them; a band keeps `fullPage: true` next to `clip`, since a clip-only capture paints nothing below the viewport |
+| Screenshot fails with `EGO_PAGE_UNRESPONSIVE` on a WebGL or three.js page | The render loop saturates the GPU | Retry once; set `window.requestAnimationFrame = () => 0` before capture and restore it after; judge a WebGL hero by signals, not pixels: WebGL context non-null, `canvas.width/height` not the 300x150 default, scene resources loaded |
 | All evaluates time out on a media-heavy page | Autoplay videos saturate the render thread | Freeze videos immediately after load, re-freeze on interval |
 
 ## Extending the skill

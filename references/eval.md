@@ -7,17 +7,19 @@ Use it as a convergence loop: benchmark, fix the named offenders, re-run, until 
 ## Run it
 
 ```bash
-bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out
+bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out <taskSpaceId>
 ```
 
-Produces in `./eval-out/`: `original.json` and `clone.json` (probe outputs), `original-full.png` and `clone-full.png` (scroll-0 fullPage screenshots), `scorecard.json`, `report.md`. Exit code 0 means pass.
+The fourth argument is the clone job's task space (numeric id or name); both sides are probed through its first Page. Without it the script opens a space named `clone-website eval` and finishes it after a successful run.
 
-Requirements: `ego-browser` on PATH, the clone's dev server running, Pillow installed for the visual dimension (`pip3 install Pillow`; without it the visual dimension is skipped and the total rescales).
+Produces in `./eval-out/`: `original.json` and `clone.json` (probe outputs), `original-full.png` and `clone-full.png` (scroll-0 full-page screenshots, CSS-pixel scale; pages taller than 16384px are captured in bands and stitched), `scorecard.json`, `report.md`. Exit code 0 means pass, 1 fail, 2 a missing prerequisite.
+
+Requirements: `ego-browser` on PATH, `python3`, the clone's dev server running, Pillow installed for the visual dimension (`python3 -m pip install Pillow` for the same `python3` the script finds; without it the visual dimension is skipped and the total rescales). On Windows, run it from Git Bash.
 
 ## Measurement conditions, non-negotiable
 
 - **Live originals drift.** Production sites ship new banners, copy, and styles at any time (town.com grew an announcement banner overnight and shifted every y coordinate below it). A score is only meaningful against the original as it was probed that day: keep the `original.json` probe with the run, and never compare a clone against an original probed on a different day. When a regression score drops, first check whether the original moved before blaming the skill or the clone.
-- Both probes run through the SAME tab (the probe navigates the task space's current tab rather than opening a per-URL tab): two tabs in one window can have content areas differing by ~16px, which shifts every centered element 8px while `page.info()` still reports equal window sizes. Viewport is recorded from in-page `innerWidth`; the scorer warns and disqualifies geometry when widths differ over 2%.
+- Both probes run through the SAME Page (the probe navigates the one Page it is given rather than opening a per-URL tab): two tabs in one window can have content areas differing by ~16px, which shifts every centered element 8px while `page.info()` still reports equal window sizes. Viewport is recorded from in-page `innerWidth`; the scorer warns and disqualifies geometry when widths differ over 2%.
 - The probe resets `localStorage`/`sessionStorage` and reloads, so stateful announcement bars measure in a deterministic state on both sides.
 - Videos are frozen and both screenshots are taken at scroll position 0; no post-scroll captures anywhere in the eval.
 - Infinite time-driven animations are phase-normalized by the probe on both sides before sampling: GSAP `repeat:-1` tweens are killed and their targets' transforms cleared (`clearProps: 'transform'` lands both sides on the natural CSS position whether or not animation init ran — JS animation setup hangs off `window load + rAF`, which in background tabs fires at an arbitrary time or never, differently per side; `progress(0)` fails because motion-path tweens start distributed along the path), infinite Web Animations set to `currentTime = 0`, looped carousel tracks anchored at their first real slide (not `translateX(0)` — loop mode prepends clone slides). Without this, marquee/motion-path/autoscroll elements sample at a random loop phase per side and geometry reports probe-timing jitter as position error (measured 50-2879px on wisprflow.ai). The probe waits for two consecutive identical pageH readings instead of a fixed settle, and the normalization re-runs synchronously at the top of the sampling evaluate so setup firing after page load cannot slip in between. CSSTransitions are excluded from the animation census; their count is sampling-moment noise.

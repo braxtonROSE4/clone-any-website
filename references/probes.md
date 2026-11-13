@@ -1,14 +1,25 @@
 # Probe library
 
-Copy-paste ego-browser scripts for each phase of `clone-website`. All run as `ego-browser nodejs <<'EOF' ... EOF` via Bash. Replace `TARGET_URL`, selectors, and output paths per task. Each heredoc is self-contained: task-space state does not reliably survive across invocations, so start every script with `await taskSpaces.useOrCreate('reverse <site>')` (same name all session) and `await browser.openOrReuseTab(url, { wait: true, timeout: 30000 })`, even where the snippets below omit them for brevity. Write full JSON to files under `reference/` and print only counts and paths.
+Copy-paste ego-browser scripts for each phase of `clone-website`. All run as `ego-browser nodejs <<'EOF' ... EOF` via Bash. Replace `TARGET_URL`, `ROOT`, the tools path, and selectors per task.
+
+Every script starts with the same two lines. `taskSpace('reverse example.com')` creates or reuses the job's space; once a script has printed `task.spaceId`, later scripts may pass that numeric id instead. Both original and clone are probed through the space's first Page, so they share one viewport:
+
+```js
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+```
+
+Write full JSON to files under `reference/` and print only counts and paths. ego's Node.js process does not run in the shell's cwd and does not see its environment variables, so every path in a script is absolute.
 
 The canonical, validated implementations of the recurring probes live in `tools/` (see `tools/manifest.json`); import them instead of re-typing:
 
 ```bash
 ego-browser nodejs <<'EOF'
 const { captureStatic } = await import('/ABSOLUTE/PATH/TO/clone-website/tools/capture-static.js')
-await taskSpaces.useOrCreate('reverse example.com')
-console.log(JSON.stringify(await captureStatic({ page, browser }, { url: 'TARGET_URL', outDir: 'reference' })))
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+console.log(JSON.stringify({ taskSpaceId: task.spaceId,
+  ...(await captureStatic({ page }, { url: 'TARGET_URL', outDir: '/ABSOLUTE/PATH/TO/project/reference' })) }))
 EOF
 ```
 
@@ -19,17 +30,21 @@ EOF
 ```bash
 ego-browser nodejs <<'EOF'
 const fs = await import('node:fs')
-await taskSpaces.useOrCreate('reverse recon')
-await browser.openOrReuseTab('TARGET_URL', { wait: true, timeout: 30000 })
+const ROOT = '/ABSOLUTE/PATH/TO/project'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 
 // freeze autoplay videos FIRST or later evaluates time out
 await page.evaluate(() => {
   const freeze = () => document.querySelectorAll('video').forEach(v => v.pause())
-  freeze(); setInterval(freeze, 400)
+  freeze(); if (!window.__rwFreeze) window.__rwFreeze = setInterval(freeze, 400)
 })
 
 const html = await page.evaluate(() => document.documentElement.outerHTML)
-fs.writeFileSync('reference/dom/full-page.html', html)
+fs.mkdirSync(ROOT + '/reference/dom', { recursive: true })
+fs.writeFileSync(ROOT + '/reference/dom/full-page.html', html)
 
 const outline = await page.evaluate(() =>
   Array.from(document.body.children).flatMap(el =>
@@ -40,8 +55,8 @@ const outline = await page.evaluate(() =>
     return { tag: el.tagName, cls: el.className?.toString().slice(0, 120), y: Math.round(r.top + scrollY), h: Math.round(r.height), w: Math.round(r.width) }
   }).filter(s => s.h > 40).sort((a, b) => a.y - b.y)
 )
-fs.writeFileSync('reference/dom/outline.json', JSON.stringify(outline, null, 2))
-console.log(JSON.stringify({ htmlKB: Math.round(html.length / 1024), sections: outline.length }))
+fs.writeFileSync(ROOT + '/reference/dom/outline.json', JSON.stringify(outline, null, 2))
+console.log(JSON.stringify({ taskSpaceId: task.spaceId, htmlKB: Math.round(html.length / 1024), sections: outline.length }))
 EOF
 ```
 
@@ -49,6 +64,10 @@ EOF
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const urls = await page.evaluate(() =>
   performance.getEntriesByType('resource').map(e => e.name).filter(u => /\.css(\?|$)/.test(u))
 )
@@ -63,6 +82,10 @@ grep -nE 'animation-timeline|view-timeline|scroll-timeline|@keyframes' reference
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const fonts = await page.evaluate(() => {
   const files = performance.getEntriesByType('resource').map(e => e.name).filter(u => /\.(woff2?|ttf|otf)(\?|$)/.test(u))
   const loaded = Array.from(document.fonts).map(f => ({ family: f.family, weight: f.weight, style: f.style, status: f.status }))
@@ -86,6 +109,10 @@ EOF
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const assets = await page.evaluate(() => {
   const dec = u => { try { const p = new URL(u, location.href); return p.pathname === '/_next/image' ? decodeURIComponent(p.searchParams.get('url')) : u } catch { return u } }
   return {
@@ -101,12 +128,19 @@ EOF
 
 ### Full-page reference screenshot (the only trustworthy way)
 
+`page.screenshot({ fullPage: true })` fails on pages taller than 16384 CSS px, so use the tool: one capture when the page fits, otherwise bands stitched into one PNG. Output is CSS-pixel scale.
+
 ```bash
 ego-browser nodejs <<'EOF'
+const { fullPageScreenshot } = await import('/ABSOLUTE/PATH/TO/clone-website/tools/full-page-screenshot.js')
+const ROOT = '/ABSOLUTE/PATH/TO/project'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 await page.evaluate(() => { scrollTo(0, 0); document.querySelectorAll('video').forEach(v => v.pause()) })
 await page.waitForTimeout(800)
-await page.screenshot({ path: 'reference/screenshots/full-page.png', fullPage: true })
-console.log('done')
+console.log(JSON.stringify(await fullPageScreenshot({ page }, { path: ROOT + '/reference/screenshots/full-page.png' })))
 EOF
 # then slice per section using outline.json coordinates:
 python3 scripts/slice.py reference/screenshots/full-page.png reference/dom/outline.json reference/screenshots/
@@ -118,10 +152,11 @@ Never screenshot after a programmatic scroll, compositor animation layers drop f
 
 ```bash
 ego-browser nodejs <<'EOF'
-await taskSpaces.useOrCreate('reverse example.com')
-await browser.openOrReuseTab('TARGET_URL', { wait: true, timeout: 30000 })
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
 await page.evaluate(() => { localStorage.clear(); sessionStorage.clear() })
-await browser.openOrReuseTab('TARGET_URL', { wait: true, timeout: 30000 })  // reopen so the cleared state takes effect
+await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })  // so the cleared state takes effect
 await page.evaluate(() => scrollTo(0, 0))
 await page.waitForTimeout(800)
 // confirm the bar state before trusting any y coordinate:
@@ -129,11 +164,21 @@ console.log(await page.evaluate(() => document.querySelector('BANNER_SELECTOR')?
 EOF
 ```
 
+If the bar's state is kept in a cookie instead, clear that one origin and nothing wider (it signs the user out of that site, so tell them first):
+
+```js
+await page.cdp('Storage.clearDataForOrigin', { origin: new URL(await page.url()).origin, storageTypes: 'cookies' })
+```
+
 ### Mock content from compiled JS chunks
 
 ```bash
 # list chunks
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 console.log((await page.evaluate(() =>
   performance.getEntriesByType('resource').map(e => e.name).filter(u => /\/_next\/static\/chunks\/.*\.js/.test(u))
 )).join('\n'))
@@ -148,6 +193,10 @@ grep -l 'Daily Client Summary' reference/js/*.js   # the config object next to t
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const anims = await page.evaluate(() =>
   document.getAnimations({ subtree: true }).map(a => ({
     target: a.effect?.target?.tagName + '.' + (a.effect?.target?.className?.toString().slice(0, 80) || ''),
@@ -165,15 +214,22 @@ EOF
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 await page.evaluate(() => {
   window.__muts = []
   new MutationObserver(ms => ms.forEach(m =>
     window.__muts.push({ t: m.target.tagName, attr: m.attributeName, cls: m.target.className?.toString().slice(0, 80) })
   )).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'style', 'src'] })
 })
-const pageH = await page.evaluate(() => document.body.scrollHeight)
+// wheel input lands where the pointer is: move it over the page first, in every script
+const { w, h } = await page.info()
+await page.mouse.move(w / 2, h / 2, { label: 'point at page' })
+const pageH = await page.evaluate(() => document.documentElement.scrollHeight)
 for (let y = 0; y < pageH; y += 400) {
-  await page.mouse.wheel(0, 400)          // real wheel events, not scrollTo
+  await page.mouse.wheel(0, 400, { label: 'scroll to record mutations' })   // real wheel events, not scrollTo
   await page.waitForTimeout(120)
 }
 const muts = await page.evaluate(() => window.__muts)
@@ -184,8 +240,14 @@ EOF
 
 ### Multi-position state sampling (fixed/sticky state machines)
 
+`tools/sample-scroll-states.js` does this in both directions; the inline form:
+
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const snap = sel => page.evaluate(s => {
   const el = document.querySelector(s); if (!el) return null
   const walk = n => ({
@@ -201,7 +263,7 @@ const depths = [0, 500, 1500, 3300, 7000]
 const out = {}
 for (const y of depths) {
   await page.evaluate(v => scrollTo(0, v), y)
-  await page.evaluate(() => window.dispatchEvent(new Event('scroll'))) // background spaces don't dispatch scroll
+  await page.evaluate(() => window.dispatchEvent(new Event('scroll'))) // scrollTo dispatches no scroll event here
   await page.waitForTimeout(600)
   out[y] = await snap('FIXED_BAR_SELECTOR')
 }
@@ -216,10 +278,15 @@ Also sample the **reverse direction** (deep → shallow): interactions are often
 
 ### Same-probe geometry diff (run against BOTH urls, diff the JSON)
 
+The unquoted heredoc lets the shell write `$URL` into the script; ego's Node.js process cannot read shell variables itself.
+
 ```bash
 for URL in https://original.example http://localhost:3400; do
 ego-browser nodejs <<EOF
-await browser.openOrReuseTab('$URL', { wait: true, timeout: 30000 })
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('$URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 await page.evaluate(() => { document.querySelectorAll('video').forEach(v => v.pause()); scrollTo(0, 0) })
 const data = await page.evaluate(() => {
   const probe = sel => { const el = document.querySelector(sel); if (!el) return null
@@ -227,7 +294,7 @@ const data = await page.evaluate(() => {
     return { x: Math.round(r.x), y: Math.round(r.y + scrollY), w: Math.round(r.width), h: Math.round(r.height),
              font: c.fontFamily.split(',')[0] + ' ' + c.fontSize + '/' + c.fontWeight,
              color: c.color, bg: c.backgroundColor, radius: c.borderRadius, pad: c.padding } }
-  return { pageH: document.body.scrollHeight,
+  return { title: document.title, pageH: document.body.scrollHeight,
     hero_h1: probe('SECTION1_SELECTOR'), nav: probe('NAV_SELECTOR') /* ...one line per named element */ }
 })
 console.log(JSON.stringify(data, null, 2))
@@ -235,12 +302,16 @@ EOF
 done
 ```
 
-Converge to ±6px per element and <1% total page height error.
+Converge to ±6px per element and <1% total page height error. Check `title` on the clone side first: a leftover dev server on the same port answers convincingly.
 
 ### Scroll-interaction assertion (probe-environment-safe)
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('TARGET_URL', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const state = async () => page.evaluate(() => ({
   scrollY, barVisible: !!document.querySelector('FLOATING_BAR')?.checkVisibility(),
   label: document.querySelector('BAR_LABEL')?.textContent ?? null,
@@ -263,6 +334,10 @@ Re-run the Phase 2 animation inventory against `localhost` and assert: same coun
 
 ```bash
 ego-browser nodejs <<'EOF'
+const task = await taskSpace('reverse example.com')
+const page = (await task.pages())[0] ?? (await task.newPage())
+await page.goto('http://localhost:3400', { waitUntil: 'domcontentloaded', timeout: 30000 })
+await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
 const report = await page.evaluate(() =>
   Array.from(document.querySelectorAll('MOCK_CARD_SELECTORS')).map(el => ({
     cls: el.className.toString().slice(0, 60),
@@ -272,5 +347,16 @@ const report = await page.evaluate(() =>
 )
 console.log(JSON.stringify(report, null, 2))
 // any panel with textLen 0 and imgs 0 is a defect until the live original proves otherwise
+EOF
+```
+
+## Ending the reply
+
+After the output shows the reply's work is done, close the space in a separate last script (keep the clone's Page only when handing it to the user to look at):
+
+```bash
+ego-browser nodejs <<'EOF'
+const task = await taskSpace(SPACE_ID)  // the taskSpaceId printed earlier
+console.log(JSON.stringify(await task.finish({ keep: [] })))
 EOF
 ```

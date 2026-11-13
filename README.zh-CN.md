@@ -41,7 +41,9 @@ git clone https://github.com/braxtonROSE4/clone-any-website.git ~/.agents/skills
 
 ## 运行时依赖
 
-所有对活页面的操作都以 `ego-browser nodejs <<'EOF' ... EOF` 的形式跑，用的是 ego lite 浏览器预置的 `page`、`browser`、`taskSpaces`。ego lite 在 https://lite.ego.app/ （macOS）；`scripts/install-ego-browser.sh` 负责下载安装，之后你在 app 里走完首次引导，`ego-browser` CLI 就注册好了。
+所有对活页面的操作都以 `ego-browser nodejs <<'EOF' ... EOF` 的形式跑，调用的是 ego lite 的 TaskSpace/Page 接口（`taskSpace()`、`task.pages()`、`page.goto()`、`page.evaluate()`、`task.finish()`）。开工前 agent 会先跑 `ego-browser skill`，拿到和本机 ego lite 版本对应的用法说明。已在 ego lite 0.6.3.12、用法说明 v2.2.1 上实测；如果 ego lite 太旧，`ego-browser skill` 会报 `Unknown command: skill`，先跑 `ego-browser upgrade` 升级。
+
+ego lite 在 https://lite.ego.app/ ，支持 macOS 和 Windows。macOS 上 `scripts/install-ego-browser.sh` 负责下载安装；Windows 上从官网下载安装包，本 skill 的脚本在 Git Bash 里跑。装好后你在 app 里走完首次引导，`ego-browser` CLI 就注册好了。
 
 这个运行时不能换成 Playwright 或裸 headless Chrome，skill 里写明了拒绝替换。三个原因：像素级对齐的循环要求两侧跑完全相同的探针、在完全相同的运行时里，否则差异数字没有意义；纠错循环要用 task space，agent 在自己隔离的 space 里探测，你同时在自己的 space 里浏览原站和克隆站，两边不抢浏览器；这个 skill 里每一段探针脚本和环境坑位都是对着这个运行时的实测行为校准的。
 
@@ -60,10 +62,10 @@ git clone https://github.com/braxtonROSE4/clone-any-website.git ~/.agents/skills
 ## 打分 benchmark
 
 ```bash
-bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out
+bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out [taskSpaceId]
 ```
 
-同一个探针跑原站和克隆站，产出 `scorecard.json` 和 `report.md`，八个维度打分：几何、排版、颜色、素材、字体、动画、mock 内容、视觉相似度。退出码 0 代表通过。前置条件是 `ego-browser` 在 PATH 上、克隆站 dev server 在跑、Pillow 已安装（没装就跳过视觉维度并重新归一总分）。
+同一个探针跑原站和克隆站，产出 `scorecard.json` 和 `report.md`，八个维度打分：几何、排版、颜色、素材、字体、动画、mock 内容、视觉相似度。退出码 0 代表通过。前置条件是 `ego-browser` 在 PATH 上、有 `python3`、克隆站 dev server 在跑、Pillow 已安装（没装就跳过视觉维度并重新归一总分）。页面高度超过 Chromium 单张截图上限 16384px 时，会分段截图再拼成一张，长落地页也能参与视觉维度打分。
 
 两条测量纪律写死在协议里。原站每天都在漂，所以跑分只对当天探到的那份 `original.json` 有意义；回归掉分时先查原站动没动，再去怀疑克隆站。另外无限时间轴动画（GSAP `repeat:-1`、跑马灯、自动滚动轮播）采样前必须做相位归一化，否则两侧各停在随机循环相位上，探针的时序抖动会被报成位置误差（在 wisprflow.ai 上实测到 50-2879px）。
 
@@ -77,7 +79,7 @@ bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-o
 | `references/eval.md` | 打分协议：八个维度的算法、阈值、测量条件 |
 | `references/install.md` | ego lite 安装引导 |
 | `references/tool-design-template.md` | 往 `tools/` 里加新工具时的设计模板 |
-| `tools/` | 类型化工具层，`manifest.json` 注册 capture_static、inventory_animations、sample_scroll_states、eval_probe |
+| `tools/` | 类型化工具层，`manifest.json` 注册 capture_static、full_page_screenshot、inventory_animations、sample_scroll_states、eval_probe |
 | `scripts/` | `run_eval.sh` 跑分入口、`eval_score.py` 打分器、`slice.py` 按 DOM rect 切全页截图、`install-ego-browser.sh` |
 | `learnings/<site>/` | 具体站点的复刻笔记（选择器、坑、config 对象在哪），下次复刻同一个站直接热启动 |
 | `agents/openai.yaml` | Codex 的展示元信息，可选，其他 agent 会忽略 |

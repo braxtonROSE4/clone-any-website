@@ -1,6 +1,6 @@
 # Tool design template
 
-How to design a reusable tool for this skill (or any ego-browser-style skill): the function shape, the manifest entry, and the description rules. This is the same schema ego-browser uses for its per-site learnings tools, so tools written this way are portable between skills.
+How to design a reusable tool for this skill (or any ego-browser-style skill): the function shape, the manifest entry, and the description rules. The manifest uses the same schema as ego-browser's per-site learnings (`nodeTools` entries with `path`, `callable`, `args`, `returns`); the function receives this skill's `ctx`, described below.
 
 ## The three layers of a tool
 
@@ -32,7 +32,7 @@ How to design a reusable tool for this skill (or any ego-browser-style skill): t
 
 Field rules:
 - `description` is one sentence, starts with the action, and names the pattern it encodes ("using the anti-click-wrap pattern", "in both directions"). It is what a model reads to decide whether to call the tool, so it must state the differentiator, not restate the name.
-- Every arg gets `type`, `required`, and a `description` that includes the default and the unit. Timeouts and waits state their unit explicitly; unit ambiguity is the classic cross-tool bug (ego-browser's page waits are ms, its task-space polling is seconds).
+- Every arg gets `type`, `required`, and a `description` that includes the default and the unit. Timeouts and waits state their unit explicitly; unit ambiguity is the classic cross-tool bug (every ego-browser time value is milliseconds, while shell `sleep` and many CLIs take seconds).
 - `returns` describes the shape the caller will actually destructure, not "an object with results".
 - Tool ids are `snake_case` verb phrases; file names are `kebab-case` verb-noun.
 
@@ -55,13 +55,14 @@ export async function sampleScrollStates(ctx, args = {}) {
 
 Design rules, each one is load-bearing:
 
-1. **Signature is always `(ctx, args)`.** `ctx` carries the runtime facades (`ctx.page`, `ctx.browser`); `args` is a plain object. No positional arguments, no globals. This is what makes the tool callable from a heredoc (`const { fn } = await import('<abs path>')` then `fn({ page, browser }, {...})`), from a manifest loader, or from another tool.
+1. **Signature is always `(ctx, args)`.** `ctx.page` is an ego-browser Page (the caller resolves it with `taskSpace()` and `task.pages()`); `args` is a plain object. No positional arguments, no globals, and no task-space selection inside the tool: the caller owns the space and its `finish()`. This is what makes the tool callable from a heredoc (`const { fn } = await import('<abs path>')` then `fn({ page }, {...})`), from a manifest loader, or from another tool. Check `ctx.page` on entry and throw with the expected shape when it is missing.
 2. **Validate and bound every input on entry.** Required args throw with the tool name in the message; numeric args are clamped through a `boundedInteger`-style helper with an explicit fallback and ceiling. A tool must be safe to call with sloppy arguments.
 3. **Verify before returning.** A tool that acted must confirm the action landed (element found, state flipped, file written) and throw with context (`JSON.stringify` the evidence) when it did not. Returning normally is the claim that the tool's contract was met.
 4. **Return plain serializable data.** No locators, no handles, no class instances. The caller prints or diffs the return value; anything that cannot survive `JSON.stringify` does not belong in it.
 5. **Do not swallow errors of required steps.** Reserve `.catch(() => {})` for optional cleanup. A tool that partially succeeded throws; the caller decides whether partial is acceptable.
 6. **Environment quirks live inside the tool.** If a probe needs videos frozen, scroll events dispatched manually, or a viewport guard, the tool does that itself instead of documenting a precondition the caller will forget. (See the Caveats table in SKILL.md for the quirks that must be absorbed.)
-7. **Big output goes to files, the return value stays small.** Tools that produce artifacts take an `outPath`/`outDir` arg, write there, and return a summary with counts and paths.
+7. **Big output goes to files, the return value stays small.** Tools that produce artifacts take an `outPath`/`outDir` arg, write there, and return a summary with counts and paths. Reject relative paths: ego's Node.js process does not run in the caller's cwd.
+8. **Files in `tools/` are ES modules.** `tools/package.json` declares `"type": "module"`; keep `import`/`export` syntax and import sibling tools with relative paths (`./full-page-screenshot.js`).
 
 ## Description writing rules (skill-level and tool-level)
 

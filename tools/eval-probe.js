@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { fullPageScreenshot } from './full-page-screenshot.js'
 
 function boundedInteger(value, fallback, max) {
   const n = value === undefined ? fallback : Number(value)
@@ -11,28 +12,40 @@ function boundedInteger(value, fallback, max) {
  * Standardized benchmark probe. Run the IDENTICAL probe on original and clone;
  * scripts/eval_score.py diffs the two JSON outputs. Never compare numbers from
  * different probes or viewports.
+ *
+ * ctx.page is an ego-browser Page. Pass the SAME Page for both sides.
  */
 export async function evalProbe(ctx, args = {}) {
+  const page = ctx?.page
+  if (!page || typeof page.evaluate !== 'function') {
+    throw new Error('evalProbe: ctx.page must be an ego-browser Page, e.g. { page: (await task.pages())[0] }')
+  }
   const { url, outPath, screenshotPath } = args
   if (!url) throw new Error('evalProbe: url is required')
   if (!outPath) throw new Error('evalProbe: outPath is required')
   if (!screenshotPath) throw new Error('evalProbe: screenshotPath is required')
+  // ego's Node.js process does not run in the shell's cwd; relative paths land somewhere unexpected.
+  for (const p of [outPath, screenshotPath]) {
+    if (!path.isAbsolute(p)) throw new Error('evalProbe: output paths must be absolute: ' + p)
+  }
   const maxPerSection = boundedInteger(args.maxPerSection, 8, 20)
 
-  // Navigate the task space's CURRENT tab rather than opening a per-URL tab:
-  // separate tabs can have content areas differing by ~16px (measured 1470 vs
-  // 1454 in the same window), which shifts every centered element 8px and
-  // poisons geometry while page.info() still reports equal window sizes.
-  // Probing original and clone through the same tab guarantees one viewport.
-  await ctx.page.goto(url, { timeout: 30000 })
+  // Navigate the one Page the caller passes for both sides rather than a
+  // per-URL tab: separate tabs can have content areas differing by ~16px
+  // (measured 1470 vs 1454 in the same window), which shifts every centered
+  // element 8px and poisons geometry while page.info() still reports equal
+  // window sizes. Probing original and clone through the same Page guarantees
+  // one viewport.
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 })
 
   // Deterministic measurement state: stateful bars reset, videos frozen, top of page.
-  await ctx.page.evaluate(() => {
+  await page.evaluate(() => {
     try { localStorage.clear(); sessionStorage.clear() } catch (e) { /* sandboxed page */ }
   })
-  await ctx.page.reload()
-  await ctx.page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {})
-  await ctx.page.evaluate(() => {
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 })
+  // Bounded wait for `load`: on some pages it fires late or never in an agent space.
+  await page.waitForLoadState('load', { timeout: 15000 }).catch(() => {})
+  await page.evaluate(() => {
     const freeze = () => document.querySelectorAll('video').forEach((v) => v.pause())
     freeze()
     if (!window.__rwFreeze) window.__rwFreeze = setInterval(freeze, 400)
@@ -45,8 +58,8 @@ export async function evalProbe(ctx, args = {}) {
   {
     let prev = -1
     for (let i = 0; i < 15; i++) {
-      await ctx.page.waitForTimeout(1000)
-      const h = await ctx.page.evaluate(() => document.body.scrollHeight)
+      await page.waitForTimeout(1000)
+      const h = await page.evaluate(() => document.body.scrollHeight)
       if (h === prev) break
       prev = h
     }
@@ -57,7 +70,7 @@ export async function evalProbe(ctx, args = {}) {
   // phase per side and report position error that is probe-timing jitter, not
   // clone infidelity (measured 50-2879px on wisprflow.ai). Same class of
   // determinism the probe already enforces for videos and localStorage banners.
-  await ctx.page.evaluate(() => {
+  await page.evaluate(() => {
     const norm = () => {
       if (window.gsap) {
         try {
@@ -94,12 +107,12 @@ export async function evalProbe(ctx, args = {}) {
     norm()
     if (!window.__rwNorm) window.__rwNorm = setInterval(norm, 300)
   })
-  await ctx.page.waitForTimeout(800)
+  await page.waitForTimeout(800)
 
-  const info = await ctx.page.info()
+  const info = await page.info()
   if (!info.w || !info.h) throw new Error('evalProbe: viewport is 0: ' + JSON.stringify(info))
 
-  const probe = await ctx.page.evaluate((maxPer) => {
+  const probe = await page.evaluate((maxPer) => {
     // re-apply phase normalization synchronously in the same task as sampling,
     // so rAF-driven writers (e.g. Splide autoScroll) cannot interject between them
     if (window.__rwNormFn) window.__rwNormFn()
@@ -195,7 +208,7 @@ export async function evalProbe(ctx, args = {}) {
   fs.mkdirSync(path.dirname(outPath), { recursive: true })
   fs.writeFileSync(outPath, JSON.stringify(probe, null, 2))
 
-  await ctx.page.screenshot({ path: screenshotPath, fullPage: true })
+  const shot = await fullPageScreenshot({ page }, { path: screenshotPath })
   if (!fs.existsSync(screenshotPath)) throw new Error('evalProbe: screenshot was not written: ' + screenshotPath)
 
   return {
@@ -209,5 +222,6 @@ export async function evalProbe(ctx, args = {}) {
     animations: probe.animations.count,
     outPath,
     screenshotPath,
+    screenshotMethod: shot.method,
   }
 }

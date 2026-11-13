@@ -1,51 +1,140 @@
 {
   "id": "clone-website",
   "name": "Clone Website",
-  "notes": ["references/probes.md", "references/eval.md"],
+  "notes": [
+    "references/probes.md",
+    "references/eval.md"
+  ],
   "nodeTools": {
     "capture_static": {
-      "description": "Capture a live page's ground truth in one pass: full DOM, section outline with rects, CSS/font/JS resource URLs, and a scroll-0 fullPage screenshot, with videos frozen and viewport guarded.",
+      "description": "Capture a live page's ground truth in one pass: full DOM, section outline with rects, CSS/font/JS resource URLs, and a scroll-0 full-page screenshot (banded past 16384px), with videos frozen and viewport guarded.",
       "path": "tools/capture-static.js",
       "callable": "captureStatic",
       "args": {
-        "url": { "type": "string", "required": true, "description": "Page URL to capture." },
-        "outDir": { "type": "string", "required": true, "description": "Directory for artifacts; dom/, screenshots/ subdirs are created. Large output goes here, not to the return value." },
-        "minSectionHeight": { "type": "integer", "required": false, "description": "Ignore outline sections shorter than this in px. Default 40." }
+        "url": {
+          "type": "string",
+          "required": true,
+          "description": "Page URL to capture."
+        },
+        "outDir": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute directory for artifacts; dom/ and screenshots/ subdirs are created. Large output goes here, not to the return value."
+        },
+        "minSectionHeight": {
+          "type": "integer",
+          "required": false,
+          "description": "Ignore outline sections shorter than this in px. Default 40."
+        }
       },
-      "returns": { "type": "object", "description": "Summary: { sections, cssFiles, fontFiles, jsChunks, htmlKB, screenshot } with artifact paths." }
+      "returns": {
+        "type": "object",
+        "description": "Summary: { viewport, sections, cssFiles, fontFiles, jsChunks, htmlKB, screenshot, screenshotMethod, outDir } with artifact paths."
+      }
+    },
+    "full_page_screenshot": {
+      "description": "Write a full-page PNG at CSS-pixel scale: one capture when the document fits Chromium's 16384px limit, otherwise (or when that capture fails) clip bands with fullPage on, stitched into one file by a built-in PNG codec.",
+      "path": "tools/full-page-screenshot.js",
+      "callable": "fullPageScreenshot",
+      "args": {
+        "path": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute output path for the PNG; missing parent directories are created."
+        },
+        "bandHeight": {
+          "type": "integer",
+          "required": false,
+          "description": "Band height in CSS px when banding. Default 4096, min 256, max 16384."
+        },
+        "forceBands": {
+          "type": "boolean",
+          "required": false,
+          "description": "Skip the single capture and always band. Default false."
+        }
+      },
+      "returns": {
+        "type": "object",
+        "description": "{ path, method: 'single' | 'bands', bands, cssWidth, cssHeight, imageWidth?, imageHeight?, singleShotError? }."
+      }
     },
     "inventory_animations": {
       "description": "List every runtime animation on the current page via document.getAnimations: resolved keyframes, timeline type (ViewTimeline = scroll-driven), ranges, target element, and inline per-element parameters.",
       "path": "tools/inventory-animations.js",
       "callable": "inventoryAnimations",
       "args": {
-        "maxAnimations": { "type": "integer", "required": false, "description": "Cap on returned animations. Default 200, max 500." },
-        "outPath": { "type": "string", "required": false, "description": "If set, write the full inventory JSON here and return only a summary." }
+        "maxAnimations": {
+          "type": "integer",
+          "required": false,
+          "description": "Cap on returned animations. Default 200, max 500."
+        },
+        "outPath": {
+          "type": "string",
+          "required": false,
+          "description": "Absolute path; if set, write the full inventory JSON here and return only a summary."
+        }
       },
-      "returns": { "type": "object", "description": "{ count, byTimeline: {ViewTimeline: n, DocumentTimeline: n}, animations | outPath }." }
+      "returns": {
+        "type": "object",
+        "description": "{ count, byTimeline: {ViewTimeline: n, DocumentTimeline: n}, animations | outPath }."
+      }
     },
     "sample_scroll_states": {
       "description": "Snapshot a fixed/sticky element's full subtree (rect, opacity, radius, background, shadow per descendant) at multiple scroll depths in both directions, dispatching scroll events manually so background task spaces still drive the state machine.",
       "path": "tools/sample-scroll-states.js",
       "callable": "sampleScrollStates",
       "args": {
-        "selector": { "type": "string", "required": true, "description": "CSS selector of the stateful element." },
-        "depths": { "type": "array", "required": false, "description": "Scroll depths in px, sampled top-down then bottom-up. Default [0, 500, 1500, 3300, 7000]." },
-        "settleMs": { "type": "integer", "required": false, "description": "Wait after each scroll dispatch in ms. Default 600, max 2000." }
+        "selector": {
+          "type": "string",
+          "required": true,
+          "description": "CSS selector of the stateful element."
+        },
+        "depths": {
+          "type": "array",
+          "required": false,
+          "description": "Scroll depths in px, sampled top-down then bottom-up. Default [0, 500, 1500, 3300, 7000]."
+        },
+        "settleMs": {
+          "type": "integer",
+          "required": false,
+          "description": "Wait after each scroll dispatch in ms. Default 600, max 2000."
+        }
       },
-      "returns": { "type": "object", "description": "{ down_<y>: subtree, up_<y>: subtree } snapshots; diff adjacent keys to read the state machine." }
+      "returns": {
+        "type": "object",
+        "description": "{ down_<y>: subtree, up_<y>: subtree } snapshots; diff adjacent keys to read the state machine."
+      }
     },
     "eval_probe": {
-      "description": "Run the standardized benchmark probe on a page (original or clone): section outline, per-section element samples with geometry/typography/color facts, loaded fonts, asset inventory, animation summary, per-section content density, plus a scroll-0 fullPage screenshot. Infinite time-driven animations (GSAP repeat:-1, infinite Web Animations, looped carousels) are phase-normalized to a deterministic state before sampling so moving elements measure comparably. Both sides of a benchmark must use this identical probe.",
+      "description": "Run the standardized benchmark probe on a page (original or clone): section outline, per-section element samples with geometry/typography/color facts, loaded fonts, asset inventory, animation summary, per-section content density, plus a scroll-0 full-page screenshot (banded past 16384px). Infinite time-driven animations (GSAP repeat:-1, infinite Web Animations, looped carousels) are phase-normalized to a deterministic state before sampling so moving elements measure comparably. Both sides of a benchmark must use this identical probe.",
       "path": "tools/eval-probe.js",
       "callable": "evalProbe",
       "args": {
-        "url": { "type": "string", "required": true, "description": "Page URL to probe." },
-        "outPath": { "type": "string", "required": true, "description": "Where to write the probe JSON." },
-        "screenshotPath": { "type": "string", "required": true, "description": "Where to write the scroll-0 fullPage screenshot." },
-        "maxPerSection": { "type": "integer", "required": false, "description": "Element samples per section. Default 8, max 20." }
+        "url": {
+          "type": "string",
+          "required": true,
+          "description": "Page URL to probe."
+        },
+        "outPath": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute path for the probe JSON."
+        },
+        "screenshotPath": {
+          "type": "string",
+          "required": true,
+          "description": "Absolute path for the scroll-0 full-page screenshot."
+        },
+        "maxPerSection": {
+          "type": "integer",
+          "required": false,
+          "description": "Element samples per section. Default 8, max 20."
+        }
       },
-      "returns": { "type": "object", "description": "Summary: { url, viewport, pageH, sections, sampledElements, fonts, assets, animations, outPath, screenshotPath }." }
+      "returns": {
+        "type": "object",
+        "description": "Summary: { url, viewport, pageH, sections, sampledElements, fonts, assets, animations, outPath, screenshotPath, screenshotMethod }."
+      }
     }
   }
 }

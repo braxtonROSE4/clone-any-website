@@ -41,7 +41,9 @@ Once installed the skill loads on its own when you ask for a clone. Trigger phra
 
 ## Runtime dependency
 
-Every live-page operation runs as `ego-browser nodejs <<'EOF' ... EOF`, using the ego lite browser's preloaded `page`, `browser`, and `taskSpaces` facades. ego lite is at https://lite.ego.app/ (macOS); `scripts/install-ego-browser.sh` downloads and installs it, then you finish first-run onboarding in the app, which registers the `ego-browser` CLI.
+Every live-page operation runs as `ego-browser nodejs <<'EOF' ... EOF` against ego lite's TaskSpace/Page API (`taskSpace()`, `task.pages()`, `page.goto()`, `page.evaluate()`, `task.finish()`). Before a job the agent runs `ego-browser skill`, which prints the usage guide for the installed ego lite version. Tested with ego lite 0.6.3.12 and usage guide v2.2.1; an older ego lite that answers `Unknown command: skill` needs `ego-browser upgrade`.
+
+ego lite is at https://lite.ego.app/ for macOS and Windows. On macOS `scripts/install-ego-browser.sh` downloads and installs it; on Windows you run the installer from the site and use Git Bash for this skill's scripts. Then you finish first-run onboarding in the app, which registers the `ego-browser` CLI.
 
 The runtime is not swappable for Playwright or a plain headless Chrome, and the skill is written to refuse the substitution. Three reasons: the pixel-level loop needs the identical probe in the identical runtime on both sides or the diff numbers mean nothing; the correction loop needs task spaces, so the agent probes in its own isolated space while you browse the original and the clone in yours without either side stealing the browser; and every probe script and environment caveat in this skill is calibrated against this runtime's measured behavior.
 
@@ -60,10 +62,10 @@ The runtime is not swappable for Playwright or a plain headless Chrome, and the 
 ## The benchmark
 
 ```bash
-bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out
+bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out [taskSpaceId]
 ```
 
-The same probe runs against the original and the clone, producing `scorecard.json` and `report.md` scored on eight dimensions: geometry, typography, color, assets, fonts, animations, mock content, visual similarity. Exit code 0 means pass. Requires `ego-browser` on PATH, the clone's dev server running, and Pillow installed (without it the visual dimension is skipped and the total rescales).
+The same probe runs against the original and the clone, producing `scorecard.json` and `report.md` scored on eight dimensions: geometry, typography, color, assets, fonts, animations, mock content, visual similarity. Exit code 0 means pass. Requires `ego-browser` on PATH, `python3`, the clone's dev server running, and Pillow installed (without it the visual dimension is skipped and the total rescales). Pages taller than Chromium's 16384px capture limit are screenshotted in bands and stitched, so long landing pages score on the visual dimension too.
 
 Two measurement rules are baked into the protocol. Live originals drift, so a score is only meaningful against the `original.json` probed that same day; when a regression score drops, check whether the original moved before blaming the clone. And infinite time-driven animations (GSAP `repeat:-1`, marquees, auto-scrolling carousels) must be phase-normalized before sampling, or each side lands on a random loop phase and probe-timing jitter gets reported as position error (measured at 50-2879px on wisprflow.ai).
 
@@ -77,7 +79,7 @@ Two measurement rules are baked into the protocol. Live originals drift, so a sc
 | `references/eval.md` | Benchmark protocol: the eight dimensions, their algorithms, thresholds, and measurement conditions |
 | `references/install.md` | ego lite install guide |
 | `references/tool-design-template.md` | Design template for adding new tools to `tools/` |
-| `tools/` | Typed tool layer; `manifest.json` registers capture_static, inventory_animations, sample_scroll_states, eval_probe |
+| `tools/` | Typed tool layer; `manifest.json` registers capture_static, full_page_screenshot, inventory_animations, sample_scroll_states, eval_probe |
 | `scripts/` | `run_eval.sh` benchmark entry point, `eval_score.py` scorer, `slice.py` fullPage screenshot slicer, `install-ego-browser.sh` |
 | `learnings/<site>/` | Per-site clone notes (selectors, quirks, where the config objects live) so the next clone of that site starts warm |
 | `agents/openai.yaml` | Optional Codex display metadata; every other agent ignores it |
