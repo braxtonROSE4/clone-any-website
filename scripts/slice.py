@@ -17,7 +17,7 @@ from pathlib import Path
 try:
     from PIL import Image
 except ImportError:
-    sys.exit("Pillow is required: pip3 install Pillow")
+    sys.exit("Pillow is missing for this Python. Use a Python that has it (on macOS /usr/bin/python3 often does), or install it in a virtual environment and activate it: python3 -m venv ~/.venvs/clone-website && ~/.venvs/clone-website/bin/pip install Pillow. Homebrew's python3 refuses a plain pip install (PEP 668).")
 
 Image.MAX_IMAGE_PIXELS = None  # fullPage captures of long pages exceed the default safety limit
 

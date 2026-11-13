@@ -146,6 +146,10 @@ export async function evalProbe(ctx, args = {}) {
       if (!overlaps) sectionEls.push(s)
     }
     sectionEls.sort((a, b) => a.r.top - b.r.top)
+    // A page without section/header/footer/nested-div bands (a single centered card, a
+    // minimal doc page) would yield zero samples and score 0 against itself; treat its
+    // body as the one section instead.
+    if (!sectionEls.length && document.body) sectionEls.push({ el: document.body, r: document.body.getBoundingClientRect() })
 
     const sections = sectionEls.map(({ el, r }, si) => {
       const samples = Array.from(el.querySelectorAll('h1,h2,h3,h4,a,button,img,p,li'))

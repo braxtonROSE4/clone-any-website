@@ -65,7 +65,7 @@ ego lite 在 https://lite.ego.app/ ，支持 macOS 和 Windows。macOS 上 `scri
 bash scripts/run_eval.sh https://original.example http://localhost:3400 ./eval-out [taskSpaceId]
 ```
 
-同一个探针跑原站和克隆站，产出 `scorecard.json` 和 `report.md`，八个维度打分：几何、排版、颜色、素材、字体、动画、mock 内容、视觉相似度。退出码 0 代表通过。前置条件是 `ego-browser` 在 PATH 上、有 `python3`、克隆站 dev server 在跑、Pillow 已安装（没装就跳过视觉维度并重新归一总分）。页面高度超过 Chromium 单张截图上限 16384px 时，会分段截图再拼成一张，长落地页也能参与视觉维度打分。
+同一个探针跑原站和克隆站，产出 `scorecard.json` 和 `report.md`，八个维度打分：几何、排版、颜色、素材、字体、动画、mock 内容、视觉相似度。退出码 0 代表通过。前置条件是 `ego-browser` 在 PATH 上、有 `python3`、克隆站 dev server 在跑、本机有一个装了 Pillow 的 Python。脚本会按 `python3`、`python`、`/usr/bin/python3` 的顺序找第一个能用 Pillow 的来打分，都没有就跳过视觉维度并重新归一总分。Homebrew 的 `python3` 不允许直接 `pip install`，macOS 上可以用自带的 `/usr/bin/python3`，或者建一个装了 Pillow 的虚拟环境再激活。页面高度超过 Chromium 单张截图上限 16384px 时，会分段截图再拼成一张，长落地页也能参与视觉维度打分。
 
 两条测量纪律写死在协议里。原站每天都在漂，所以跑分只对当天探到的那份 `original.json` 有意义；回归掉分时先查原站动没动，再去怀疑克隆站。另外无限时间轴动画（GSAP `repeat:-1`、跑马灯、自动滚动轮播）采样前必须做相位归一化，否则两侧各停在随机循环相位上，探针的时序抖动会被报成位置误差（在 wisprflow.ai 上实测到 50-2879px）。
 

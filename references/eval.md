@@ -14,7 +14,7 @@ The fourth argument is the clone job's task space (numeric id or name); both sid
 
 Produces in `./eval-out/`: `original.json` and `clone.json` (probe outputs), `original-full.png` and `clone-full.png` (scroll-0 full-page screenshots, CSS-pixel scale; pages taller than 16384px are captured in bands and stitched), `scorecard.json`, `report.md`. Exit code 0 means pass, 1 fail, 2 a missing prerequisite.
 
-Requirements: `ego-browser` on PATH, `python3`, the clone's dev server running, Pillow installed for the visual dimension (`python3 -m pip install Pillow` for the same `python3` the script finds; without it the visual dimension is skipped and the total rescales). On Windows, run it from Git Bash.
+Requirements: `ego-browser` on PATH, `python3`, the clone's dev server running, Pillow for the visual dimension. The script scores with the first of `python3`, `python`, `/usr/bin/python3` that can import Pillow; when none can, the visual dimension is skipped and the total rescales. Homebrew's `python3` refuses `pip install` (PEP 668), so on macOS either rely on `/usr/bin/python3`, which often ships Pillow, or create a virtual environment with Pillow and activate it before running. On Windows, run it from Git Bash.
 
 ## Measurement conditions, non-negotiable
 

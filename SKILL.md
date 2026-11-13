@@ -2,7 +2,7 @@
 name: clone-website
 description: Reverse-engineer and pixel-perfect clone any live website, a single landing page or an entire site. Captures DOM, CSS design tokens, assets, fonts, and compiled-JS config data from the live page, reverse-engineers scroll animations and stateful interactions, rebuilds (raw-HTML mirror for static-export sites like Webflow/Framer, Next.js components for JS-framework sites), then proves fidelity with a scored benchmark (same-probe geometry diff, asset/font/animation coverage, screenshot slicing). Use this skill whenever the user wants to clone, replicate, rebuild, or reverse-engineer a website's design or behavior. Triggers include "clone this website", "reverse this landing page", "rebuild this page pixel-perfect", "copy this site's design", "how does this site do that scroll effect", "复刻网站", "复刻落地页", "1:1 复刻", "逆向这个网站". Prefer this skill over ad-hoc screenshot-and-eyeball cloning. Not for general browser automation, scraping, or screenshots (use ego-browser directly), capturing article content into notes, SEO/content audits, or building a new design merely inspired by a site; load it only when the goal is faithful reproduction or understanding a site's implementation. Runs on the ego lite browser via the ego-browser skill; when the ego-browser CLI is not installed, guide the user through installing ego lite first (references/install.md) instead of substituting another automation tool.
 metadata:
-  version: "2.2.0"
+  version: "2.2.1"
   date: "2026-11-13"
   battle-tested-on: "arc.net, town.com (2026-08-01), wisprflow.ai (2026-08-02, re-verified 2026-11-13)"
   tested-with: "ego lite 0.6.3.12, ego-browser usage guide v2.2.1"

@@ -15,8 +15,17 @@ SKILL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 command -v ego-browser >/dev/null 2>&1 || {
   echo "ego-browser is not on PATH; install ego lite first (references/install.md)" >&2; exit 2; }
-PY="$(command -v python3 || command -v python || true)"
+# Prefer a Python that already has Pillow (the visual dimension needs it). On macOS the
+# Homebrew python3 first on PATH often lacks it and refuses pip installs (PEP 668), while
+# /usr/bin/python3 may have it.
+PY=""
+for cand in python3 python /usr/bin/python3; do
+  p="$(command -v "$cand" 2>/dev/null)" || continue
+  [ -n "$PY" ] || PY="$p"
+  if "$p" -c 'import PIL' >/dev/null 2>&1; then PY="$p"; break; fi
+done
 [ -n "$PY" ] || { echo "python3 is required for scoring" >&2; exit 2; }
+echo "scoring with $PY" >&2
 
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"

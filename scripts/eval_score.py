@@ -222,7 +222,7 @@ def score_visual(orig_png, clone_png, orig_pageh, clone_pageh, bands=24):
     try:
         from PIL import Image
     except ImportError:
-        return None, {"skipped": "Pillow not installed; run: pip3 install Pillow"}
+        return None, {"skipped": "Pillow is missing for this Python. Use a Python that has it (on macOS /usr/bin/python3 often does), or install it in a virtual environment and activate it: python3 -m venv ~/.venvs/clone-website && ~/.venvs/clone-website/bin/pip install Pillow. Homebrew's python3 refuses a plain pip install (PEP 668)."}
     Image.MAX_IMAGE_PIXELS = None
     a = Image.open(orig_png).convert("L")
     b = Image.open(clone_png).convert("L")
